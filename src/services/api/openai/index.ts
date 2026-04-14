@@ -68,7 +68,10 @@ export function isOpenAIThinkingEnabled(model: string): boolean {
   if (isEnvTruthy(process.env.OPENAI_ENABLE_THINKING)) return true
   // Auto-detect from model name (deepseek-reasoner and DeepSeek-V3.2 support thinking mode)
   const modelLower = model.toLowerCase()
-  return modelLower.includes('deepseek-reasoner') || modelLower.includes('deepseek-v3.2')
+  return (
+    modelLower.includes('deepseek-reasoner') ||
+    modelLower.includes('deepseek-v3.2')
+  )
 }
 
 /**
@@ -96,7 +99,15 @@ export function buildOpenAIRequestBody(params: {
   enable_thinking?: boolean
   chat_template_kwargs?: { thinking: boolean }
 } {
-  const { model, messages, tools, toolChoice, enableThinking, maxTokens, temperatureOverride } = params
+  const {
+    model,
+    messages,
+    tools,
+    toolChoice,
+    enableThinking,
+    maxTokens,
+    temperatureOverride,
+  } = params
   return {
     model,
     messages,
@@ -118,9 +129,10 @@ export function buildOpenAIRequestBody(params: {
     }),
     // Only send temperature when thinking mode is off (DeepSeek ignores it anyway,
     // but other providers may respect it)
-    ...(!enableThinking && temperatureOverride !== undefined && {
-      temperature: temperatureOverride,
-    }),
+    ...(!enableThinking &&
+      temperatureOverride !== undefined && {
+        temperature: temperatureOverride,
+      }),
   }
 }
 
@@ -134,11 +146,24 @@ function assembleFinalAssistantOutputs(params: {
   contentBlocks: Record<number, any>
   tools: Tools
   agentId: string | undefined
-  usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number; cache_read_input_tokens: number }
+  usage: {
+    input_tokens: number
+    output_tokens: number
+    cache_creation_input_tokens: number
+    cache_read_input_tokens: number
+  }
   stopReason: string | null
   maxTokens: number
 }): (AssistantMessage | SystemAPIErrorMessage)[] {
-  const { partialMessage, contentBlocks, tools, agentId, usage, stopReason, maxTokens } = params
+  const {
+    partialMessage,
+    contentBlocks,
+    tools,
+    agentId,
+    usage,
+    stopReason,
+    maxTokens,
+  } = params
   const outputs: (AssistantMessage | SystemAPIErrorMessage)[] = []
 
   const allBlocks = Object.keys(contentBlocks)
@@ -150,7 +175,11 @@ function assembleFinalAssistantOutputs(params: {
     outputs.push({
       message: {
         ...partialMessage,
-        content: normalizeContentFromAPI(allBlocks, tools, agentId as AgentId | undefined),
+        content: normalizeContentFromAPI(
+          allBlocks,
+          tools,
+          agentId as AgentId | undefined,
+        ),
         usage,
         stop_reason: stopReason,
         stop_sequence: null,
@@ -163,12 +192,15 @@ function assembleFinalAssistantOutputs(params: {
   }
 
   if (stopReason === 'max_tokens') {
-    outputs.push(createAssistantAPIErrorMessage({
-      content: `Output truncated: response exceeded the ${maxTokens} token limit. ` +
-        `Set CLAUDE_CODE_MAX_OUTPUT_TOKENS to override.`,
-      apiError: 'max_output_tokens',
-      error: 'max_output_tokens',
-    }))
+    outputs.push(
+      createAssistantAPIErrorMessage({
+        content:
+          `Output truncated: response exceeded the ${maxTokens} token limit. ` +
+          `Set CLAUDE_CODE_MAX_OUTPUT_TOKENS to override.`,
+        apiError: 'max_output_tokens',
+        error: 'max_output_tokens',
+      }),
+    )
   }
 
   return outputs
@@ -256,9 +288,13 @@ export async function* queryModelOpenAI(
 
     // 8. Convert messages and tools to OpenAI format
     const enableThinking = isOpenAIThinkingEnabled(openaiModel)
-    const openaiMessages = anthropicMessagesToOpenAI(messagesForAPI, systemPrompt, {
-      enableThinking,
-    })
+    const openaiMessages = anthropicMessagesToOpenAI(
+      messagesForAPI,
+      systemPrompt,
+      {
+        enableThinking,
+      },
+    )
     const openaiTools = anthropicToolsToOpenAI(standardTools)
     const openaiToolChoice = anthropicToolChoiceToOpenAI(options.toolChoice)
 
@@ -310,10 +346,7 @@ export async function* queryModelOpenAI(
       maxTokens,
       temperatureOverride: options.temperatureOverride,
     })
-    const stream = await client.chat.completions.create(
-      requestBody,
-      { signal },
-    )
+    const stream = await client.chat.completions.create(requestBody, { signal })
 
     // 12. Convert OpenAI stream to Anthropic events, then process into
     //     AssistantMessage + StreamEvent (matching the Anthropic path behavior)
@@ -395,8 +428,13 @@ export async function* queryModelOpenAI(
           // here and injected so tokenCountWithEstimation() can read it.
           if (partialMessage) {
             for (const output of assembleFinalAssistantOutputs({
-              partialMessage, contentBlocks, tools, agentId: options.agentId,
-              usage, stopReason, maxTokens,
+              partialMessage,
+              contentBlocks,
+              tools,
+              agentId: options.agentId,
+              usage,
+              stopReason,
+              maxTokens,
             })) {
               yield output
             }
@@ -424,8 +462,13 @@ export async function* queryModelOpenAI(
     // Safety: if stream ended without message_stop, assemble and yield whatever we have
     if (partialMessage) {
       for (const output of assembleFinalAssistantOutputs({
-        partialMessage, contentBlocks, tools, agentId: options.agentId,
-        usage, stopReason, maxTokens,
+        partialMessage,
+        contentBlocks,
+        tools,
+        agentId: options.agentId,
+        usage,
+        stopReason,
+        maxTokens,
       })) {
         yield output
       }
@@ -436,7 +479,9 @@ export async function* queryModelOpenAI(
     yield createAssistantAPIErrorMessage({
       content: `API Error: ${errorMessage}`,
       apiError: 'api_error',
-      error: (error instanceof Error ? error : new Error(String(error))) as unknown as SDKAssistantMessageError,
+      error: (error instanceof Error
+        ? error
+        : new Error(String(error))) as unknown as SDKAssistantMessageError,
     })
   }
 }

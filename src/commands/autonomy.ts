@@ -109,7 +109,10 @@ const call: LocalCommandCall = async (args: string) => {
 
   return {
     type: 'text',
-    value: [formatAutonomyRunsStatus(runs), formatAutonomyFlowsStatus(flows)].join('\n'),
+    value: [
+      formatAutonomyRunsStatus(runs),
+      formatAutonomyFlowsStatus(flows),
+    ].join('\n'),
   }
 }
 

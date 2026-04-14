@@ -6,7 +6,11 @@
  *   output: { role: 'assistant', content: string | part[] }
  */
 
-import type { Message, AssistantMessage, UserMessage } from 'src/types/message.js'
+import type {
+  Message,
+  AssistantMessage,
+  UserMessage,
+} from 'src/types/message.js'
 
 type LangfuseContentPart =
   | { type: 'text'; text: string }
@@ -33,9 +37,17 @@ function normalizeContent(content: unknown): string | LangfuseContentPart[] {
     if (type === 'text') {
       parts.push({ type: 'text', text: String(b.text ?? '') })
     } else if (type === 'thinking' || type === 'redacted_thinking') {
-      parts.push({ type: 'thinking', thinking: String(b.thinking ?? '[redacted]') })
+      parts.push({
+        type: 'thinking',
+        thinking: String(b.thinking ?? '[redacted]'),
+      })
     } else if (type === 'tool_use') {
-      parts.push({ type: 'tool_use', id: String(b.id ?? ''), name: String(b.name ?? ''), input: b.input })
+      parts.push({
+        type: 'tool_use',
+        id: String(b.id ?? ''),
+        name: String(b.name ?? ''),
+        input: b.input,
+      })
     } else if (type === 'tool_result') {
       const resultContent = Array.isArray(b.content)
         ? (b.content as Record<string, unknown>[])
@@ -47,22 +59,40 @@ function normalizeContent(content: unknown): string | LangfuseContentPart[] {
             })
             .join('\n')
         : String(b.content ?? '')
-      parts.push({ type: 'tool_result', tool_use_id: String(b.tool_use_id ?? ''), content: resultContent })
+      parts.push({
+        type: 'tool_result',
+        tool_use_id: String(b.tool_use_id ?? ''),
+        content: resultContent,
+      })
     } else if (type === 'image') {
       parts.push({ type: 'text', text: '[image]' })
     } else if (type === 'document') {
-      const name = (b.source as Record<string, unknown> | undefined)?.filename
-        ?? (b.title as string | undefined)
-        ?? 'document'
+      const name =
+        (b.source as Record<string, unknown> | undefined)?.filename ??
+        (b.title as string | undefined) ??
+        'document'
       parts.push({ type: 'text', text: `[document: ${name}]` })
-    } else if (type === 'server_tool_use' || type === 'web_search_tool_result' || type === 'tool_search_tool_result') {
+    } else if (
+      type === 'server_tool_use' ||
+      type === 'web_search_tool_result' ||
+      type === 'tool_search_tool_result'
+    ) {
       // server-side tool blocks — keep name/id, drop raw content
-      parts.push({ type: type, id: String(b.id ?? ''), name: String(b.name ?? type) })
+      parts.push({
+        type: type,
+        id: String(b.id ?? ''),
+        name: String(b.name ?? type),
+      })
     } else {
       // unknown block: keep type + scalar fields only, drop any binary/large payloads
       const safe: Record<string, unknown> = { type: type ?? 'unknown' }
       for (const [k, v] of Object.entries(b)) {
-        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') safe[k] = v
+        if (
+          typeof v === 'string' ||
+          typeof v === 'number' ||
+          typeof v === 'boolean'
+        )
+          safe[k] = v
       }
       parts.push(safe as LangfuseContentPart)
     }
@@ -108,7 +138,10 @@ export function convertOutputToLangfuse(
   if (messages.length === 0) return null
   if (messages.length === 1) {
     const msg = messages[0]!
-    return { role: 'assistant', content: normalizeContent(msg.message?.content) }
+    return {
+      role: 'assistant',
+      content: normalizeContent(msg.message?.content),
+    }
   }
   return messages.map(msg => ({
     role: 'assistant' as const,

@@ -107,7 +107,7 @@ export async function* queryModelGemini(
 
     const adaptedStream = adaptGeminiStreamToAnthropic(stream, geminiModel)
     const contentBlocks: Record<number, any> = {}
-    let partialMessage: any = undefined
+    let partialMessage: any
     let ttftMs = 0
     const start = Date.now()
 
@@ -187,7 +187,9 @@ export async function* queryModelGemini(
     yield createAssistantAPIErrorMessage({
       content: `API Error: ${errorMessage}`,
       apiError: 'api_error',
-      error: (error instanceof Error ? error : new Error(String(error))) as unknown as SDKAssistantMessageError,
+      error: (error instanceof Error
+        ? error
+        : new Error(String(error))) as unknown as SDKAssistantMessageError,
     })
   }
 }

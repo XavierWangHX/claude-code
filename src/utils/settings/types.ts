@@ -1159,4 +1159,3 @@ export type PluginConfig = {
     [serverName: string]: UserConfigValues
   }
 }
-

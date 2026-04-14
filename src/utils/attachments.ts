@@ -803,11 +803,12 @@ export async function getAttachments(
         !options?.skipSkillDiscovery
           ? [
               maybe('skill_discovery', async () => {
-                const result = await skillSearchModules.prefetch.getTurnZeroSkillDiscovery(
-                  input,
-                  messages ?? [],
-                  context,
-                )
+                const result =
+                  await skillSearchModules.prefetch.getTurnZeroSkillDiscovery(
+                    input,
+                    messages ?? [],
+                    context,
+                  )
                 return result ? [result] : []
               }),
             ]
@@ -996,11 +997,13 @@ export async function getAttachments(
 
   clearTimeout(timeoutId)
   // Defensive: a getter leaking [undefined] crashes .map(a => a.type) below.
-  return ([
-    ...userAttachmentResults.flat(),
-    ...threadAttachmentResults.flat(),
-    ...mainThreadAttachmentResults.flat(),
-  ] as Attachment[]).filter(a => a !== undefined && a !== null)
+  return (
+    [
+      ...userAttachmentResults.flat(),
+      ...threadAttachmentResults.flat(),
+      ...mainThreadAttachmentResults.flat(),
+    ] as Attachment[]
+  ).filter(a => a !== undefined && a !== null)
 }
 
 async function maybe<A>(label: string, f: () => Promise<A[]>): Promise<A[]> {
@@ -1527,7 +1530,8 @@ export function getAgentListingDeltaAttachment(
     if (msg.type !== 'attachment') continue
     if (msg.attachment!.type !== 'agent_listing_delta') continue
     for (const t of msg.attachment!.addedTypes as string[]) announced.add(t)
-    for (const t of msg.attachment!.removedTypes as string[]) announced.delete(t)
+    for (const t of msg.attachment!.removedTypes as string[])
+      announced.delete(t)
   }
 
   const currentTypes = new Set(filtered.map(a => a.agentType))
@@ -1749,7 +1753,6 @@ export function memoryFilesToAttachments(
         limit: undefined,
         isPartialView: memoryFile.contentDiffersFromDisk,
       })
-
 
       // Fire InstructionsLoaded hook for audit/observability (fire-and-forget)
       if (shouldFireHook && isInstructionsMemoryType(memoryFile.type)) {
@@ -2257,7 +2260,11 @@ export function collectSurfacedMemories(messages: ReadonlyArray<Message>): {
   let totalBytes = 0
   for (const m of messages) {
     if (m.type === 'attachment' && m.attachment!.type === 'relevant_memories') {
-      for (const mem of m.attachment!.memories as { path: string; content: string; mtimeMs: number }[]) {
+      for (const mem of m.attachment!.memories as {
+        path: string
+        content: string
+        mtimeMs: number
+      }[]) {
         paths.add(mem.path)
         totalBytes += mem.content.length
       }
@@ -2474,7 +2481,11 @@ export function collectRecentSuccessfulTools(
     if (!m) continue
     if (isHumanTurn(m) && m !== lastUserMessage) break
     if (m.type === 'assistant' && typeof m.message!.content !== 'string') {
-      for (const block of m.message!.content as Array<{type: string; id: string; name: string}>) {
+      for (const block of m.message!.content as Array<{
+        type: string
+        id: string
+        name: string
+      }>) {
         if (block.type === 'tool_use') useIdToName.set(block.id, block.name)
       }
     } else if (
@@ -2482,7 +2493,7 @@ export function collectRecentSuccessfulTools(
       'message' in m &&
       Array.isArray(m.message!.content)
     ) {
-      for (const block of m.message!.content as Array<{type: string}>) {
+      for (const block of m.message!.content as Array<{ type: string }>) {
         if (isToolResultBlock(block)) {
           resultByUseId.set(block.tool_use_id, block.is_error === true)
         }
@@ -2502,7 +2513,6 @@ export function collectRecentSuccessfulTools(
   }
   return [...succeeded].filter(t => !failed.has(t))
 }
-
 
 /**
  * Filters prefetched memory attachments to exclude memories the model already
@@ -3982,7 +3992,6 @@ export function getContextEfficiencyAttachment(
 
   return [{ type: 'context_efficiency' }]
 }
-
 
 function isFileReadDenied(
   filePath: string,
