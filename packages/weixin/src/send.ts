@@ -4,9 +4,45 @@ import { sendMessage } from './api.js'
 import { guessMediaType, uploadFile } from './media.js'
 import { MessageItemType, MessageState, MessageType } from './types.js'
 
+function stripCodeBlocks(text: string): string {
+  // Non-regex approach to avoid ReDoS on inputs with many ``` sequences.
+  let result = ''
+  let i = 0
+  while (i < text.length) {
+    if (text.startsWith('```', i)) {
+      // Skip the opening fence (including optional language tag on same line)
+      let j = i + 3
+      // skip to end of first line (the fence line itself)
+      while (j < text.length && text[j] !== '\n') j++
+      if (j < text.length) j++ // skip the \n
+      // Collect content until closing ```
+      const contentStart = j
+      while (j < text.length) {
+        if (text.startsWith('```', j)) {
+          result += text.slice(contentStart, j)
+          // skip closing fence and its trailing newline
+          j += 3
+          while (j < text.length && text[j] !== '\n') j++
+          if (j < text.length) j++ // skip \n
+          break
+        }
+        j++
+      }
+      // If no closing fence found, include rest as-is
+      if (j >= text.length && !text.startsWith('```', j - 3)) {
+        result += text.slice(i)
+      }
+      i = j
+    } else {
+      result += text[i]
+      i++
+    }
+  }
+  return result
+}
+
 export function markdownToPlainText(text: string): string {
-  return text
-    .replace(/```[\s\S]*?\n([\s\S]*?)```/g, '$1')
+  return stripCodeBlocks(text)
     .replace(/`([^`]+)`/g, '$1')
     .replace(/\*\*\*(.+?)\*\*\*/g, '$1')
     .replace(/\*\*(.+?)\*\*/g, '$1')
