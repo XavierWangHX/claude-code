@@ -6,15 +6,6 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import {
-  ChannelPermissionRequestNotificationSchema,
-  type ChannelPermissionRequestParams,
-} from '../mcp/channelNotification.js'
-import { initializeAnalyticsSink } from '../analytics/sink.js'
-import { shutdownDatadog } from '../analytics/datadog.js'
-import { shutdown1PEventLogging } from '../analytics/firstPartyEventLogger.js'
-import { enableConfigs } from '../../utils/config.js'
-import { logForDebugging } from '../../utils/debug.js'
-import {
   CDN_BASE_URL,
   DEFAULT_BASE_URL,
   loadAccount,
@@ -27,8 +18,21 @@ import {
   sendMediaFile,
   sendText,
   TypingStatus,
-} from '@claude-code-best/weixin'
-import type { ParsedMessage } from '@claude-code-best/weixin'
+} from './index.js'
+import type { ParsedMessage } from './monitor.js'
+import type { ChannelPermissionRequestParams } from './permissions.js'
+
+export interface WeixinServerDeps {
+  enableConfigs(): void
+  initializeAnalyticsSink(): void
+  shutdownDatadog(): Promise<void>
+  shutdown1PEventLogging(): Promise<void>
+  logForDebugging(message: string): void
+  registerPermissionHandler(
+    server: Server,
+    handler: (request: ChannelPermissionRequestParams) => Promise<void>,
+  ): void
+}
 
 function formatPermissionRequestMessage(
   request: ChannelPermissionRequestParams,
@@ -45,9 +49,9 @@ function formatPermissionRequestMessage(
   ].join('\n')
 }
 
-export function createWeixinMcpServer(): Server {
+export function createWeixinMcpServer(version: string): Server {
   const server = new Server(
-    { name: 'weixin', version: MACRO.VERSION },
+    { name: 'weixin', version },
     {
       capabilities: {
         experimental: {
@@ -224,61 +228,60 @@ export function createWeixinMcpServer(): Server {
   return server
 }
 
-export async function runWeixinMcpServer(): Promise<void> {
-  enableConfigs()
-  initializeAnalyticsSink()
+export async function runWeixinMcpServer(
+  version: string,
+  deps: WeixinServerDeps,
+): Promise<void> {
+  deps.enableConfigs()
+  deps.initializeAnalyticsSink()
 
   const account = loadAccount()
   if (!account) {
     process.stderr.write(
       '[weixin] No account configured. Run `ccb weixin login` to connect your WeChat account.\n',
     )
-    await Promise.all([shutdown1PEventLogging(), shutdownDatadog()])
+    await Promise.all([deps.shutdown1PEventLogging(), deps.shutdownDatadog()])
     process.exit(1)
   }
 
-  const server = createWeixinMcpServer()
+  const server = createWeixinMcpServer(version)
   const transport = new StdioServerTransport()
 
-  server.setNotificationHandler(
-    ChannelPermissionRequestNotificationSchema(),
-    async notification => {
-      const request = notification.params
-      const targetChatId = request.channel_context?.chat_id
-      const targetChat = targetChatId
-        ? {
-            chatId: targetChatId,
-            contextToken: getContextToken(targetChatId),
-          }
-        : getActivePermissionChat()
+  deps.registerPermissionHandler(server, async request => {
+    const targetChatId = request.channel_context?.chat_id
+    const targetChat = targetChatId
+      ? {
+          chatId: targetChatId,
+          contextToken: getContextToken(targetChatId),
+        }
+      : getActivePermissionChat()
 
-      if (!targetChat) {
-        logForDebugging(
-          `[Weixin MCP] No active chat available for permission request ${request.request_id}`,
-        )
-        return
-      }
+    if (!targetChat) {
+      deps.logForDebugging(
+        `[Weixin MCP] No active chat available for permission request ${request.request_id}`,
+      )
+      return
+    }
 
-      try {
-        savePendingPermission(
-          request,
-          targetChat.chatId,
-          targetChat.contextToken,
-        )
-        await sendText({
-          to: targetChat.chatId,
-          text: formatPermissionRequestMessage(request),
-          baseUrl,
-          token: account.token,
-          contextToken: targetChat.contextToken || '',
-        })
-      } catch (error) {
-        process.stderr.write(
-          `[weixin] Failed to relay permission request ${request.request_id}: ${error}\n`,
-        )
-      }
-    },
-  )
+    try {
+      savePendingPermission(
+        request,
+        targetChat.chatId,
+        targetChat.contextToken,
+      )
+      await sendText({
+        to: targetChat.chatId,
+        text: formatPermissionRequestMessage(request),
+        baseUrl,
+        token: account.token,
+        contextToken: targetChat.contextToken || '',
+      })
+    } catch (error) {
+      process.stderr.write(
+        `[weixin] Failed to relay permission request ${request.request_id}: ${error}\n`,
+      )
+    }
+  })
 
   await server.connect(transport)
 
@@ -292,7 +295,7 @@ export async function runWeixinMcpServer(): Promise<void> {
     if (!controller.signal.aborted) {
       controller.abort()
     }
-    await Promise.all([shutdown1PEventLogging(), shutdownDatadog()])
+    await Promise.all([deps.shutdown1PEventLogging(), deps.shutdownDatadog()])
     process.exit(0)
   }
 
@@ -313,7 +316,7 @@ export async function runWeixinMcpServer(): Promise<void> {
     }
   }, 5000)
 
-  logForDebugging('[Weixin MCP] Starting poll loop')
+  deps.logForDebugging('[Weixin MCP] Starting poll loop')
   await startPollLoop({
     baseUrl,
     cdnBaseUrl: CDN_BASE_URL,

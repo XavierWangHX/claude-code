@@ -107,5 +107,9 @@ export type {
   ActivePermissionChat,
 } from './permissions.js'
 
+// Server (MCP)
+export { createWeixinMcpServer, runWeixinMcpServer } from './server.js'
+export type { WeixinServerDeps } from './server.js'
+
 // CLI
 export { handleWeixinCli } from './cli.js'
