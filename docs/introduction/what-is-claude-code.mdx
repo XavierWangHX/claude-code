@@ -1,7 +1,7 @@
 ---
-title: "什么是 Claude Code - Terminal Native Agentic Coding System"
-description: "Claude Code 是运行在终端中的 agentic coding system，直接在你的项目目录中读代码、改文件、跑命令、调试程序。了解它的技术定位、架构差异和核心能力。"
-keywords: ["Claude Code", "AI 编程助手", "Agentic Coding", "终端 AI", "CLI AI"]
+title: "项目介绍"
+description: "Claude Code 是运行在终端中的 agentic coding system。理解它的设计定位、架构选择和核心能力。"
+keywords: ["Claude Code", "AI 编程助手", "Agentic Coding", "终端 AI"]
 og:image: "https://ccb.agent-aura.top/docs/images/og-cover.png"
 ---
 
@@ -9,103 +9,104 @@ og:image: "https://ccb.agent-aura.top/docs/images/og-cover.png"
 
 Claude Code 是一个**运行在本地终端中的 agentic coding system**。它不是给建议的聊天机器人——它直接在你的项目目录中读代码、改文件、跑命令、调试程序，拥有完整的 shell 能力。
 
-## 技术定位：terminal-native agentic system
+## 设计定位
 
 理解 Claude Code 的关键在于三个词：
 
-| 定位关键词 | 含义 |
-|-----------|------|
-| **Terminal-native** | 原生 CLI 应用，不是 IDE 插件、不是 Web 界面、不是 API wrapper |
-| **Agentic** | AI 自主决策工具调用链，不是"一问一答"的聊天模式 |
-| **Coding system** | 面向软件工程全流程，不是通用问答工具 |
+| 定位 | 含义 | 设计影响 |
+|------|------|----------|
+| **Terminal-native** | 原生 CLI 应用，不是 IDE 插件也不是 Web 界面 | 拥有完整 shell 访问权，但需要自建权限模型和安全沙箱 |
+| **Agentic** | AI 自主决定调用什么工具、传什么参数、何时停止 | 不是"一问一答"，而是多轮自主决策循环 |
+| **Coding system** | 面向软件工程全流程设计 | 工具集覆盖文件操作、命令执行、代码搜索、任务管理 |
 
-与同类工具的**架构层面**差异（不是功能清单）：
+### 为什么选择终端
 
-| 工具 | 架构模式 | 运行位置 | 工具执行 |
-|------|----------|----------|----------|
-| **Claude Code** | Terminal-native agentic loop | 本地进程 | 直接 shell 执行 |
-| Cursor / Copilot | IDE-integrated autocomplete + chat | IDE 进程内 | LSP / IDE API |
-| Aider | CLI chat → git patch | 本地进程 | 文件操作为主 |
-| ChatGPT / Claude.ai | Cloud chat + artifacts | 浏览器/云端 | 沙箱容器 |
+终端不是限制，而是一个有意为之的架构选择。它带来了独特的能力，也带来了对应的代价：
 
-核心差异：Claude Code 拥有**完整的 shell 访问权**——这意味着它可以做任何你在终端里能做的事，但也需要对应的安全机制来约束这个能力。
+**优势：**
+- **完整的 shell 访问** — 可以运行任何命令行工具，无需为每个能力写插件
+- **项目原生** — 直接在项目目录工作，天然理解文件系统结构和 git 状态
+- **可组合性** — 管道模式（`echo "..." | claude -p`）允许嵌入 CI/CD 和自动化流程
+- **低延迟** — 没有 Electron 开销，React/Ink 渲染的 TUI 响应极快
 
-## 端到端示例：从输入到输出
+**代价：**
+- 用户需要适应命令行界面
+- 没有 GUI 意味着无法直接展示图片、图表等富内容
+- 权限管理的复杂度远高于 IDE 插件（因为能力边界更大）
 
-当你在终端中输入 `bun run dev 有个 TypeScript 报错，帮我修一下` 时，系统发生了什么？
+### 与同类工具的架构差异
+
+| 工具 | 架构模式 | 工具执行方式 | 安全边界 |
+|------|----------|-------------|----------|
+| **Claude Code** | Terminal-native agentic loop | 直接 shell 执行 | 自建权限模型 + 沙箱 |
+| Cursor / Copilot | IDE-integrated autocomplete + chat | LSP / IDE API | IDE 沙箱天然隔离 |
+| Aider | CLI chat → git patch | 文件操作为主 | 通过 git diff 约束变更范围 |
+| ChatGPT / Claude.ai | Cloud chat + artifacts | 沙箱容器 | 云端容器隔离 |
+
+核心区别：Claude Code 把 AI 放在了**与用户相同的权限层级**上。这既是它最强大的地方，也是安全设计最复杂的挑战。
+
+## 端到端：一次任务的生命周期
+
+当你在终端中输入 `bun run dev 有个 TypeScript 报错，帮我修一下` 时，系统经历了什么？
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ 1. 入口层 (cli.tsx → main.tsx)                          │
-│    feature() = false, MACRO 注入, 启动 Commander.js CLI  │
-├─────────────────────────────────────────────────────────┤
-│ 2. 交互层 (REPL.tsx — React/Ink)                        │
-│    PromptInput 捕获用户输入 → UserMessage 加入会话       │
-├─────────────────────────────────────────────────────────┤
-│ 3. 编排层 (QueryEngine.ts)                               │
-│    管理 turn 生命周期、token 预算、compaction 触发       │
-├─────────────────────────────────────────────────────────┤
-│ 4. 核心循环 (query.ts — Agentic Loop)                    │
-│    组装上下文 → 调 API → 收流式响应 → 解析工具调用      │
-│    → 权限检查 → 执行工具 → 结果回传 → 再次调 API → 循环 │
-├─────────────────────────────────────────────────────────┤
-│ 5. 工具执行 (BashTool.call / FileEditTool.call / ...)    │
-│    实际执行: 读文件、运行命令、搜索代码...               │
-├─────────────────────────────────────────────────────────┤
-│ 6. 通信层 (claude.ts → Anthropic API)                    │
-│    流式 HTTP, 支持 Bedrock/Vertex/Foundry 等 7 种 provider      │
-└─────────────────────────────────────────────────────────┘
+用户输入 → REPL 捕获 → 上下文组装 → API 调用 → 流式响应
+                                                    ↓
+                                              解析工具调用
+                                                    ↓
+                                          权限检查 → 执行工具
+                                                    ↓
+                                          结果回传 → 再次调 API
+                                                    ↓
+                                              循环直到完成
 ```
 
-具体到这个报错修复场景，一次典型的 agentic loop 可能包含多轮工具调用：
+具体到这个报错修复场景，一次典型的 agentic loop：
 
-| Turn | AI 决策 | 工具调用 | 结果 |
-|------|---------|----------|------|
-| 1 | 先看报错信息 | `Bash("bun run dev 2>&1 | head -30")` | TypeScript 错误输出 |
-| 2 | 定位到文件 | `Read("src/utils/foo.ts")` | 源代码内容 |
-| 3 | 搜索相关类型定义 | `Grep("interface Foo", "src/")` | 类型定义位置 |
-| 4 | 修复代码 | `FileEdit(old, new)` | 代码已修改 |
-| 5 | 验证修复 | `Bash("bun run dev 2>&1 | head -10")` | 编译通过 |
+| 步骤 | AI 自主决策 | 工具调用 | 设计考量 |
+|------|------------|----------|----------|
+| 1 | 先复现报错 | `Bash("bun run dev 2>&1 | head -30")` | AI 自行决定先诊断再修复，而非直接改代码 |
+| 2 | 定位到问题文件 | `Read("src/utils/foo.ts")` | 读取而非猜测，保证修改基于最新代码 |
+| 3 | 搜索相关类型定义 | `Grep("interface Foo", "src/")` | 跨文件理解依赖关系 |
+| 4 | 修改代码 | `FileEdit(old, new)` | 精确替换而非全文重写，保留 git 历史可追溯 |
+| 5 | 验证修复 | `Bash("bun run dev 2>&1 | head -10")` | 自主验证是 agentic 系统的关键闭环 |
 
-每一步都是 AI 自主决策的——它决定用哪个工具、传什么参数、何时停止。这就是 "agentic" 的含义。
+每一步都是 AI 自主决策的。它决定用哪个工具、传什么参数、何时停止——这就是 "agentic" 的含义。
+
+## 核心设计原则
+
+这些原则贯穿整个系统的设计：
+
+**1. 能力优先，安全兜底**
+
+系统设计的第一步是"让 AI 能做什么"，然后才是"如何限制它"。这导致工具系统非常强大（完整 shell），但需要配套的权限模型（每次敏感操作可配置为需用户确认）。
+
+**2. 本地优先**
+
+所有代码执行都在本地机器上，不经过云端沙箱。这意味着：
+- 用户对数据有完全控制权
+- 可以访问本地文件系统、网络、硬件
+- 但也需要自己承担安全风险
+
+**3. 流式一切**
+
+从 API 响应到工具执行结果，所有数据都以流的方式处理。这让用户可以在 AI 思考的同时看到进展，也使得长时间运行的任务可以中途取消。
+
+**4. 上下文工程**
+
+系统花大量精力在"给 AI 看什么"上——自动收集 git 状态、项目结构、CLAUDE.md 指令、历史记忆等。上下文的质量直接决定 AI 的表现。
 
 ## 它不是什么
 
-- **不是 IDE 插件**：没有图形界面，不依赖 VS Code 或任何 IDE
-- **不是 API wrapper**：它有自己的工具系统、权限模型、上下文工程、会话管理
-- **不是聊天机器人**：输出不是纯文本，而是实际的文件修改、命令执行
-- **不是无脑执行器**：每个敏感操作都有权限检查和用户确认环节
+理解边界和了解能力一样重要：
 
-## 启动入口解剖
+- **不是 IDE 插件** — 没有图形界面，不依赖任何 IDE
+- **不是 API wrapper** — 它有自己的工具系统、权限模型、上下文工程、会话管理
+- **不是聊天机器人** — 输出不是纯文本建议，而是实际的文件修改和命令执行
+- **不是无脑执行器** — 每个敏感操作都有权限检查，系统内置规划模式用于复杂任务
 
-真正的代码入口是 `src/entrypoints/cli.tsx`，它做了三件关键的事：
+## 接下来
 
-```typescript
-// 1. 注入运行时 polyfill —— feature() 永远返回 false
-const feature = (_name: string) => false;
-
-// 2. 注入构建时宏
-globalThis.MACRO = { VERSION: "2.1.888", BUILD_TIME: ..., };
-
-// 3. 声明构建目标
-globalThis.BUILD_TARGET = "external";  // 外部构建（非 Anthropic 内部）
-globalThis.BUILD_ENV = "production";
-globalThis.INTERFACE_TYPE = "stdio";   // 标准 I/O 交互
-```
-
-然后控制流传递到 `src/main.tsx`：
-1. Commander.js 解析命令行参数
-2. 初始化认证、遥测、策略限制
-3. 加载工具列表（`getTools()`）
-4. 启动 REPL（`launchRepl()`）或管道模式（`-p`）
-
-## 为什么选择终端
-
-终端不是限制，而是选择。它带来了独特的能力：
-
-- **完整的 shell 访问**：可以运行任何命令行工具，无需为每个能力写插件
-- **项目原生**：直接在项目目录工作，理解文件系统结构、git 状态
-- **可组合性**：管道模式（`echo "..." | claude -p`）允许嵌入 CI/CD 和自动化流程
-- **低延迟**：没有 Electron 开销，React/Ink 渲染的 TUI 响应极快
-
-代价是用户需要适应命令行界面——但也正因如此，它吸引的是需要**真正掌控开发环境**的开发者。
+- **架构总览** — 了解系统的模块划分和数据流
+- **Agent Loop** — 深入理解核心循环的工作机制
+- **工具系统** — 了解 AI 拥有哪些工具及其设计考量
