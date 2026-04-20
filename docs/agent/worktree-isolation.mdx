@@ -1,185 +1,99 @@
 ---
-title: "Worktree 隔离 - Git Worktree 实现文件级隔离"
-description: "揭秘 Claude Code 的 git worktree 隔离机制：子 Agent 如何获得独立工作空间，worktree 创建/销毁生命周期、路径命名规则和安全防护。"
+title: "Worktree 隔离"
+description: "多 Agent 并行工作时，共享同一目录会导致冲突。Git worktree 提供文件系统级隔离，让每个 Agent 拥有独立的工作空间。"
 keywords: ["Worktree", "git worktree", "文件隔离", "多 Agent 隔离", "并行安全"]
 ---
 
-{/* 本章目标：揭示 worktree 的创建/销毁生命周期、路径命名规则、hook 机制和退出时的安全防护 */}
-
-## 为什么需要文件级隔离
+## 核心问题
 
 多 Agent 并行工作时，共享同一工作目录会导致三类冲突：
 
-1. **写入冲突**：两个 Agent 同时编辑 `config.ts`，后写的覆盖前写的
+1. **写入冲突**：两个 Agent 同时编辑同一个文件，后写的覆盖前写的
 2. **状态干扰**：Agent A 的测试依赖某个环境状态，Agent B 的修改破坏了它
 3. **不可区分**：半完成的修改混在一起，无法分辨哪些是哪个 Agent 的
 
 Git worktree 是 git 原生的解决方案——在同一个仓库中创建多个独立工作目录，每个在自己的分支上。
 
-## 目录结构与命名规则
-
-Worktree 文件统一存放在仓库根目录下的 `.claude/worktrees/`：
+## 目录结构
 
 ```
 <repo-root>/
 ├── .claude/
 │   └── worktrees/
-│       ├── fix-auth-bug/          # worktree 工作目录
-│       │   ├── .git               # 指向主仓库的链接文件
-│       │   └── src/...            # 独立的文件系统视图
-│       └── add-dark-mode/         # 另一个 worktree
+│       ├── fix-auth-bug/          ← Agent A 的独立工作空间
+│       │   └── .git               ← 指向主仓库的链接
+│       └── add-dark-mode/         ← Agent B 的独立工作空间
 │           └── ...
-├── src/                           # 主工作目录（不受影响）
-└── .git/                          # 主仓库
+├── src/                           ← 主工作目录（不受影响）
+└── .git/                          ← 主仓库
 ```
 
-分支命名规则为 `worktree/<slug>`，其中 slug 由 `validateWorktreeSlug()` 校验：每个 `/` 分隔的段只允许字母、数字、`.`、`_`、`-`，总长 ≤64 字符。未指定时使用 plan slug 自动生成。
+每个 worktree 是一个完整的文件系统视图，但共享同一个 git 历史。Agent 在自己的 worktree 中修改文件，不会影响主分支或其他 Agent。
 
-## 创建流程：EnterWorktreeTool
+## 创建与恢复
 
-`EnterWorktreeTool`（`packages/builtin-tools/src/tools/EnterWorktreeTool/EnterWorktreeTool.ts`）的执行链路：
+### 创建流程
 
 ```
-EnterWorktreeTool.call({ name? })
-  ↓
-1. 检查是否已在 worktree 中（防嵌套）
-  ↓
-2. 解析到主仓库根目录（findCanonicalGitRoot）
-   如果当前已在 worktree 内，chdir 到主仓库
-  ↓
-3. 生成 slug（用户提供或 plan slug）
-  ↓
-4. createWorktreeForSession(sessionId, slug)
-   ├── 有 WorktreeCreate hook？
-   │   └── 执行 hook，返回 hook 指定的路径（支持非 git VCS）
-   └── 无 hook → git 原生路径：
-       a. getOrCreateWorktree(repoRoot, slug)
-          ├── 快速恢复：检查 worktree 目录是否已存在
-          │   └── 读取 .git 指针文件的 HEAD SHA（无子进程）
-          └── 新建：
-              i.   mkdir .claude/worktrees/（recursive）
-              ii.  fetch origin/<default-branch>（有缓存则跳过）
-              iii. git worktree add -b worktree/<slug> <path> <base>
-              iv.  performPostCreationSetup()（sparse checkout 等）
-  ↓
-5. 更新进程状态：
-   - process.chdir(worktreePath)
-   - setCwd(worktreePath)
-   - setOriginalCwd(worktreePath)
-   - saveWorktreeState(session) → 持久化到项目配置
-   - clearSystemPromptSections() → 重新计算系统提示中的 cwd 信息
-   - clearMemoryFileCaches() → 重新加载 worktree 中的 CLAUDE.md
-  ↓
-6. 返回 worktreePath 和 worktreeBranch
+检查是否已在 worktree 中（防嵌套） → 生成 slug → 创建 worktree → 切换进程工作目录
 ```
 
-### Hook 优先的架构
-
-`createWorktreeForSession()` 首先检查 `hasWorktreeCreateHook()`——如果用户在 settings.json 中配置了 `WorktreeCreate` hook，系统完全不调用 git，而是执行 hook 命令并将返回的路径作为 worktree 路径。这允许非 git 版本控制系统（如 Pijul、Mercurial）通过 hook 接入。
+**设计细节**：
+- 分支名遵循 `worktree/<slug>` 格式，slug 有严格的字符限制
+- 创建后自动更新进程状态——所有后续文件操作自动在 worktree 中执行
+- 系统提示和 CLAUDE.md 被重新加载，确保 AI 看到 worktree 中的上下文
 
 ### 快速恢复路径
 
-`getOrCreateWorktree()` 有一个关键优化：如果目标路径已存在，直接读取 `.git` 指针文件获取 HEAD SHA（纯文件 I/O，无子进程），跳过整个 `fetch` + `worktree add` 流程。在大仓库中 `fetch` 需要 6-8 秒，这个优化将恢复场景的延迟降到接近 0。
+如果目标 worktree 已存在，直接读取指针文件获取 HEAD SHA——纯文件 I/O，无子进程。在大仓库中 `git fetch` 可能需要 6-8 秒，这个优化将恢复延迟降到接近 0。
 
-## 退出流程：ExitWorktreeTool
+**设计洞察**：恢复（resume）是比创建更频繁的操作。用户可能中断后重新开始，或者 Agent 在之前的 worktree 上继续工作。优化恢复路径比优化创建路径更有价值。
 
-`ExitWorktreeTool`（`packages/builtin-tools/src/tools/ExitWorktreeTool/ExitWorktreeTool.ts`）支持两种退出策略：
+### Hook 优先架构
 
-### keep：保留 worktree
+如果用户配置了 `WorktreeCreate` hook，系统完全不调用 git，而是执行 hook 命令获取路径。这允许非 git 版本控制系统（如 Pijul、Mercurial）通过 hook 接入隔离机制。
 
-```
-keepWorktree()
-  ↓
-1. chdir 回 originalCwd
-2. 清空 currentWorktreeSession
-3. 更新项目配置（activeWorktreeSession = undefined）
-4. worktree 目录和分支保留在磁盘上
-```
+## 退出与清理
 
-用户可以通过 `cd <worktreePath>` 继续工作，或稍后手动合并。
+退出支持两种策略：
 
-### remove：删除 worktree
+| 策略 | 行为 | 适用场景 |
+|------|------|---------|
+| **keep** | 保留 worktree 和分支 | 后续需要合并或审查 |
+| **remove** | 删除 worktree 和分支 | 确认不再需要 |
 
-有严格的**安全防护**：
+### Fail-closed 安全防护
 
-```
-validateInput() — 第一道防线
-  ↓
-1. 检查是否在 EnterWorktree 创建的会话中
-   （手动创建的 worktree 不会被删除）
-  ↓
-2. countWorktreeChanges(worktreePath, originalHeadCommit)
-   ├── git status --porcelain → 统计未提交文件数
-   ├── git rev-list --count <originalHead>..HEAD → 统计新提交数
-   └── 返回 null（git 失败时）→ fail-closed（拒绝删除）
-  ↓
-3. 有未提交文件或新提交？
-   → 拒绝，要求 discard_changes: true 确认
-```
+删除操作有多层安全防护：
 
-```
-call() — 实际执行
-  ↓
-1. 重新计数变更（validateInput 和 call 之间可能有新修改）
-2. 如果有 tmux session → killTmuxSession()
-3. cleanupWorktree()
-   ├── hook-based → 执行 WorktreeRemove hook
-   └── git-based → git worktree remove --force + git branch -D
-4. restoreSessionToOriginalCwd()
-   - setCwd(originalCwd)
-   - setOriginalCwd(originalCwd)
-   - 如果 projectRoot 是 worktree 时才恢复（防误触）
-   - 更新 hooks config snapshot
-   - 清空系统提示和 memory 缓存
-```
+1. 只允许删除通过 EnterWorktree 创建的 worktree（手动 `git worktree add` 的不会被删）
+2. 有未提交文件或新提交时，拒绝删除（除非显式 `discard_changes: true`）
+3. git 命令失败时，返回"未知"状态，拒绝删除
 
-### fail-closed 设计
+**设计哲学**：宁可让用户手动处理废弃的 worktree，也不冒险丢失工作。磁盘空间比丢失代码便宜得多。
 
-`countWorktreeChanges()` 在以下情况返回 `null`（"未知，假设不安全"）：
-- `git status` 或 `git rev-list` 退出非零（锁文件、损坏的索引）
-- `originalHeadCommit` 未定义（hook-based worktree 没有设置基线 commit）
+### 重新计数
 
-返回 `null` 时，`validateInput` 拒绝删除——宁可让用户手动处理，也不冒险丢失工作。
+validateInput 和实际执行之间可能有新的修改。删除前重新计数变更，确保不会误删。
 
-## 与 Agent 工具的联动
+## 与子 Agent 的联动
 
-Agent 工具（`AgentTool`）的 `isolation` 参数决定子 Agent 是否在 worktree 中运行。注意 Agent 工具使用**专用的** `createAgentWorktree()`（`src/utils/worktree.ts`），而非用户会话用的 `createWorktreeForSession()`，两者有关键差异：
+子 Agent 的 `isolation: "worktree"` 参数自动在独立 worktree 中运行。子 Agent 的 worktree 管理与用户会话略有不同：
 
-| 维度 | `createWorktreeForSession`（用户会话） | `createAgentWorktree`（子 Agent） |
-|------|---------------------------------------|----------------------------------|
-| 调用者 | EnterWorktreeTool | AgentTool |
-| Session 管理 | 设置 `currentWorktreeSession` | **不设置** `currentWorktreeSession` |
-| 恢复已有 worktree | 直接复用 | 复用并 bump mtime（防止被周期性清理误删） |
+| 维度 | 用户会话 | 子 Agent |
+|------|---------|---------|
+| Session 状态 | 完整持久化 | 无 session 状态 |
+| 清理策略 | 手动退出 | 自动清理（无变更则删除） |
+| 有变更时 | 用户决定 | 保留 worktree，返回路径 |
 
-子 Agent 结束时的处理由 `cleanupWorktreeIfNeeded()` 自动完成——它不走 `ExitWorktreeTool`（因为 Agent worktree 没有会话状态，`ExitWorktreeTool` 的 `validateInput` 会拒绝）：
-- **有变更** → 保留 worktree，返回 `worktreePath` 供主 Agent 后续合并
-- **无变更** → 自动删除
-- **Hook-based** → 始终保留
-
-## Session 状态持久化
-
-`WorktreeSession` 对象通过 `saveCurrentProjectConfig()` 持久化到磁盘，包含：
-
-```typescript
-{
-  originalCwd: string,         // 进入 worktree 前的工作目录
-  worktreePath: string,        // worktree 的绝对路径
-  worktreeName: string,        // slug
-  worktreeBranch?: string,     // 分支名（如 worktree/fix-auth）
-  originalBranch?: string,     // 进入前的分支
-  originalHeadCommit?: string, // 进入前的 HEAD commit（用于变更统计）
-  sessionId: string,           // 创建此 worktree 的会话 ID
-  tmuxSessionName?: string,    // 关联的 tmux session
-  hookBased?: boolean,         // 是否由 hook 创建
-  creationDurationMs?: number, // 创建耗时（分析用）
-  usedSparsePaths?: boolean,   // 是否使用了 sparse checkout
-}
-```
-
-这使得 session 恢复（`--resume`）时能正确还原 worktree 上下文——即使进程重启，`getCurrentWorktreeSession()` 从项目配置中读取状态。
+**设计考量**：子 Agent 的 worktree 不需要用户手动管理——如果 Agent 没有产生任何修改，worktree 被自动清理；如果有修改，保留下来供主 Agent 后续合并。
 
 ## Sparse Checkout 优化
 
-对于大型 monorepo，worktree 支持 `sparsePaths` 配置——只检出特定目录而非整个仓库。这在 210K 文件的仓库中将 worktree 创建时间从数十秒降到几秒。
+大型 monorepo 中，完整检出可能需要数十秒。Sparse checkout 只检出特定目录，将创建时间降到几秒。
 
-配置位于 `getInitialSettings().worktree?.sparsePaths`，在 `performPostCreationSetup()` 中应用。
+## 接下来
+
+- **子 Agent** — 理解使用 worktree 隔离的子 Agent 创建
+- **协调者与蜂群** — 理解多 Agent 的高级编排
+- **权限模型** — 理解工具权限的安全体系
