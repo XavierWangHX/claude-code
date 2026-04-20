@@ -690,6 +690,9 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
       setClassifierChecking(toolUseID)
       let classifierResult
       try {
+        logForDebugging(
+          `[auto-mode] classifyYoloAction called with langfuseTrace=${context.langfuseTrace ? `id=${(context.langfuseTrace as unknown as Record<string, unknown>).id ?? 'present'}` : 'null/undefined'}`,
+        )
         classifierResult = await classifyYoloAction(
           context.messages,
           action,

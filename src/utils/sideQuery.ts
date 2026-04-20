@@ -19,6 +19,7 @@ import { createTrace, createChildSpan, endTrace, recordLLMObservation } from '..
 import type { LangfuseSpan } from '../services/langfuse/index.js'
 import { convertMessagesToLangfuse, convertOutputToLangfuse, convertToolsToLangfuse } from '../services/langfuse/convert.js'
 import { getModelBetas, modelSupportsStructuredOutputs } from './betas.js'
+import { logForDebugging } from './debug.js'
 import { errorMessage } from './errors.js'
 import { computeFingerprint } from './fingerprint.js'
 import { getAPIProvider } from './model/providers.js'
@@ -194,8 +195,15 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
 
   // When parentSpan is provided, create a child span nested under the
   // main agent trace; otherwise create a standalone root trace.
-  const langfuseTrace = opts.parentSpan
-    ? createChildSpan(opts.parentSpan, {
+  const _ps = opts.parentSpan
+  // eslint-disable-next-line no-constant-condition
+  if (opts.querySource === 'auto_mode') {
+    logForDebugging(
+      `[sideQuery] auto_mode parentSpan=${_ps ? `id=${(_ps as unknown as Record<string, unknown>).id ?? 'present'}` : 'null/undefined'} querySource=${opts.querySource}`,
+    )
+  }
+  const langfuseTrace = _ps
+    ? createChildSpan(_ps, {
         name: traceName,
         sessionId: getSessionId(),
         model: normalizedModel,
