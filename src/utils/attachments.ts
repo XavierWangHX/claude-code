@@ -2372,6 +2372,12 @@ export function startRelevantMemoryPrefetch(
     return undefined
   }
 
+  // Poor mode: skip the side-query to save tokens
+  const { isPoorModeActive } = require('../commands/poor/poorMode.js') as typeof import('../commands/poor/poorMode.js')
+  if (isPoorModeActive()) {
+    return undefined
+  }
+
   const lastUserMessage = messages.findLast(m => m.type === 'user' && !m.isMeta)
   if (!lastUserMessage) {
     return undefined
