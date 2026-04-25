@@ -47,6 +47,14 @@ import {
   TOOL_SEARCH_TOOL_NAME,
 } from '@claude-code-best/builtin-tools/tools/ToolSearchTool/prompt.js'
 
+/**
+ * Mirrors the Anthropic request path's deferred-tool announcement for OpenAI.
+ *
+ * OpenAI-compatible endpoints cannot consume Anthropic's `defer_loading` or
+ * `tool_reference` beta payloads directly, so the model needs the same textual
+ * list of deferred MCP tool names that Anthropic receives before it can ask
+ * ToolSearchTool to load their full schemas.
+ */
 function prependDeferredToolListIfNeeded(
   messages: Message[],
   tools: Tools,
