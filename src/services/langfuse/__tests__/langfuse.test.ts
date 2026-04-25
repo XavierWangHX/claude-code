@@ -184,6 +184,32 @@ describe('Langfuse integration', () => {
     })
   })
 
+  describe('convertMessagesToLangfuse', () => {
+    test('preserves OpenAI-style messages including deferred tool announcements', async () => {
+      const { convertMessagesToLangfuse } = await import('../convert.js')
+      const result = convertMessagesToLangfuse([
+        {
+          role: 'system',
+          content: 'system prompt',
+        },
+        {
+          role: 'user',
+          content:
+            '<available-deferred-tools>\nmcp__wechat__send_message\n</available-deferred-tools>',
+        },
+      ])
+
+      expect(result).toEqual([
+        { role: 'system', content: 'system prompt' },
+        {
+          role: 'user',
+          content:
+            '<available-deferred-tools>\nmcp__wechat__send_message\n</available-deferred-tools>',
+        },
+      ])
+    })
+  })
+
   // ── client tests ────────────────────────────────────────────────────────────
 
   describe('isLangfuseEnabled', () => {

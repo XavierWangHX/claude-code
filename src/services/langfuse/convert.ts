@@ -30,6 +30,11 @@ type LangfuseChatMessage = {
   tool_call_id?: string
 }
 
+type LangfuseInputMessage =
+  | UserMessage
+  | AssistantMessage
+  | LangfuseChatMessage
+
 /** Normalize a content block into a LangfuseContentPart (non-tool_use, non-tool_result) */
 function toContentPart(block: Record<string, unknown>): LangfuseContentPart | null {
   const type = block.type as string | undefined
@@ -127,9 +132,9 @@ function toRole(msg: Message): 'user' | 'assistant' | 'system' {
   return 'user'
 }
 
-/** Convert messagesForAPI (UserMessage | AssistantMessage)[] → Langfuse input format */
+/** Convert internal or OpenAI-style messages → Langfuse input format */
 export function convertMessagesToLangfuse(
-  messages: (UserMessage | AssistantMessage)[],
+  messages: LangfuseInputMessage[],
   systemPrompt?: readonly string[],
 ): LangfuseChatMessage[] {
   const result: LangfuseChatMessage[] = []
@@ -139,12 +144,23 @@ export function convertMessagesToLangfuse(
     }
   }
   for (const msg of messages) {
-    const inner = msg.message
+    const inner = 'message' in msg ? msg.message : msg
     if (!inner) continue
-    const role = (inner.role as 'user' | 'assistant' | undefined) ?? toRole(msg)
+    const role =
+      (inner.role as 'user' | 'assistant' | 'system' | 'tool' | undefined) ??
+      ('message' in msg ? toRole(msg) : 'user')
     const rawContent = inner.content
     if (typeof rawContent === 'string' || !Array.isArray(rawContent)) {
-      result.push({ role, content: String(rawContent ?? '') })
+      result.push({
+        role,
+        content: String(rawContent ?? ''),
+        ...('tool_call_id' in inner && typeof inner.tool_call_id === 'string'
+          ? { tool_call_id: inner.tool_call_id }
+          : {}),
+        ...('tool_calls' in inner && Array.isArray(inner.tool_calls)
+          ? { tool_calls: inner.tool_calls as LangfuseToolCall[] }
+          : {}),
+      })
       continue
     }
 

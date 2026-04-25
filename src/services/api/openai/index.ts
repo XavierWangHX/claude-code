@@ -400,7 +400,7 @@ export async function* queryModelOpenAI(
     recordLLMObservation(options.langfuseTrace ?? null, {
       model: openaiModel,
       provider: 'openai',
-      input: convertMessagesToLangfuse(messagesForAPI, systemPrompt),
+      input: convertMessagesToLangfuse(openaiMessages),
       output: convertOutputToLangfuse(collectedMessages),
       usage: {
         input_tokens: usage.input_tokens,
