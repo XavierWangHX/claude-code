@@ -30,6 +30,18 @@ type LangfuseChatMessage = {
   tool_call_id?: string
 }
 
+function isLangfuseRole(value: unknown): value is LangfuseChatMessage['role'] {
+  switch (value) {
+    case 'user':
+    case 'assistant':
+    case 'system':
+    case 'tool':
+      return true
+    default:
+      return false
+  }
+}
+
 type LangfuseInputMessage =
   | UserMessage
   | AssistantMessage
@@ -144,11 +156,11 @@ export function convertMessagesToLangfuse(
     }
   }
   for (const msg of messages) {
-    const inner = 'message' in msg ? msg.message : msg
+    const isWrappedMessage = 'message' in msg
+    const inner = isWrappedMessage ? msg.message : msg
     if (!inner) continue
     const role =
-      (inner.role as 'user' | 'assistant' | 'system' | 'tool' | undefined) ??
-      ('message' in msg ? toRole(msg) : 'user')
+      isLangfuseRole(inner.role) ? inner.role : isWrappedMessage ? toRole(msg) : 'user'
     const rawContent = inner.content
     if (typeof rawContent === 'string' || !Array.isArray(rawContent)) {
       result.push({
