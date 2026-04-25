@@ -228,6 +228,54 @@ describe('Langfuse integration', () => {
         { role: 'tool', content: 'tool output', tool_call_id: 'call_1' },
       ])
     })
+
+    test('merges assistant tool calls from OpenAI-style array content', async () => {
+      const { convertMessagesToLangfuse } = await import('../convert.js')
+      const result = convertMessagesToLangfuse([
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'calling a tool',
+              tool_calls: [
+                {
+                  id: 'call_from_part',
+                  type: 'function',
+                  function: { name: 'part_tool', arguments: '{}' },
+                },
+              ],
+            },
+          ],
+          tool_calls: [
+            {
+              id: 'call_from_message',
+              type: 'function',
+              function: { name: 'message_tool', arguments: '{"ok":true}' },
+            },
+          ],
+        },
+      ])
+
+      expect(result).toEqual([
+        {
+          role: 'assistant',
+          content: 'calling a tool',
+          tool_calls: [
+            {
+              id: 'call_from_message',
+              type: 'function',
+              function: { name: 'message_tool', arguments: '{"ok":true}' },
+            },
+            {
+              id: 'call_from_part',
+              type: 'function',
+              function: { name: 'part_tool', arguments: '{}' },
+            },
+          ],
+        },
+      ])
+    })
   })
 
   // ── client tests ────────────────────────────────────────────────────────────
